@@ -1,0 +1,58 @@
+# ── builder: install dependencies with composer ────────────────────────────────
+FROM composer:2 AS vendor
+
+WORKDIR /app
+
+COPY composer.json composer.lock ./
+RUN composer install \
+        --no-dev \
+        --no-scripts \
+        --no-autoloader \
+        --prefer-dist \
+        --no-interaction
+
+COPY . .
+RUN composer dump-autoload --optimize --no-dev
+
+# ── production ─────────────────────────────────────────────────────────────────
+FROM dunglas/frankenphp:1-php8.3-alpine AS runner
+
+# FrankenPHP ships with Caddy; add system deps and PHP extensions
+RUN apk add --no-cache \
+        bash curl git unzip zip \
+        libzip-dev oniguruma-dev postgresql-dev \
+        autoconf g++ make \
+    && install-php-extensions \
+        bcmath \
+        mbstring \
+        pdo_pgsql \
+        zip \
+        pcntl \
+        redis \
+    && apk del autoconf g++ make
+
+WORKDIR /var/www/html
+
+COPY --from=vendor /app/vendor ./vendor
+COPY . .
+
+RUN chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+COPY docker/entrypoint.frankenphp.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Octane listens on 8000 internally; Traefik/Caddy handles TLS externally
+EXPOSE 8000
+
+# SERVER_NAME=:8000 le indica a Caddy que escuche en HTTP plano.
+# Traefik (Dokploy) maneja TLS externamente; Caddy no debe intentarlo.
+ENV SERVER_NAME=":8000"
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["php", "artisan", "octane:start", \
+     "--server=frankenphp", \
+     "--host=0.0.0.0", \
+     "--port=8000", \
+     "--workers=auto", \
+     "--max-requests=500"]

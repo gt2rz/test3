@@ -1,0 +1,119 @@
+# ============================================================
+# Production – FrankenPHP + Laravel Octane (Dokploy / Traefik)
+# Usage: docker compose -f docker-compose.frankenphp.yml up -d
+# Requires: .env.production
+#
+# Pre-requisitos en el proyecto Laravel:
+#   composer require laravel/octane
+#   php artisan octane:install --server=frankenphp
+# ============================================================
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.frankenphp
+      target: runner
+    # Traefik enruta el tráfico; no exponer puertos directamente
+    networks:
+      - dokploy-network
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    labels:
+      - traefik.enable=true
+      # Reemplaza APP_DOMAIN con tu dominio real, ej: api.example.com
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-api.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-api.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}-api.tls.certresolver=letsencrypt
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}-api.loadbalancer.server.port=8000
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/up || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:17-alpine
+    networks:
+      - internal
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-laravel}
+      POSTGRES_USER: ${DB_USERNAME:-laravel}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:8-alpine
+    networks:
+      - internal
+    command: >
+      sh -c 'redis-server
+             --requirepass "$$REDIS_PASSWORD"
+             --maxmemory 256mb
+             --maxmemory-policy allkeys-lru
+             --save 60 1'
+    volumes:
+      - redis_prod:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_prod:
+    driver: local
+  redis_prod:
+    driver: local
+
+networks:
+  dokploy-network:
+    external: true   # red compartida de Traefik en Dokploy
+  internal:
+    driver: bridge   # red privada; postgres y redis no son accesibles desde fuera
