@@ -9,7 +9,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runner
-    image: ${APP_NAME:-laravel}-api:latest
     ports:
       - "80:80"
     depends_on:
