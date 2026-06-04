@@ -16,6 +16,8 @@ bootstrap/cache/*.php
 *.log
 docker-compose*.yml
 README.md
+frankenphp
+frankenphp-worker.php
 
 .env*
 !.env.example
