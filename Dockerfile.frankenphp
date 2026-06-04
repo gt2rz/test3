@@ -40,19 +40,13 @@ RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
 COPY docker/entrypoint.frankenphp.sh /entrypoint.sh
+COPY docker/Caddyfile /etc/caddy/Caddyfile
 RUN chmod +x /entrypoint.sh
 
-# Octane listens on 8000 internally; Traefik/Caddy handles TLS externally
 EXPOSE 8000
 
-# SERVER_NAME=:8000 le indica a Caddy que escuche en HTTP plano.
-# Traefik (Dokploy) maneja TLS externamente; Caddy no debe intentarlo.
-ENV SERVER_NAME=":8000"
+# Traefik maneja TLS externamente; FrankenPHP escucha en HTTP plano.
+ENV LARAVEL_OCTANE=1
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["php", "artisan", "octane:start", \
-     "--server=frankenphp", \
-     "--host=0.0.0.0", \
-     "--port=8000", \
-     "--workers=auto", \
-     "--max-requests=500"]
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
